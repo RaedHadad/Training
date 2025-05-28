@@ -1,31 +1,37 @@
 #!/bin/bash
-
 set -e
 
-sudo apt update && sudo apt install -y prometheus telegraf grafana alertmanager
+# Install Prometheus manually (optional: use binary or Docker)
+sudo apt update
+sudo apt install -y wget curl gnupg software-properties-common apt-transport-https ca-certificates
 
-# Copy Prometheus configs
+# Add Telegraf repo
+curl -s https://repos.influxdata.com/influxdata-archive_compat.key | sudo gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
+echo "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/influxdata.list
+
+# Add Grafana repo
+sudo mkdir -p /etc/apt/keyrings
+sudo curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+
+sudo apt update
+sudo apt install -y telegraf grafana
+
+# Optional: Prometheus and Alertmanager manual install here, or via scripts
+
+# Copy configs
 sudo mkdir -p /etc/prometheus/rules
-sudo cp prometheus/prometheus.yml /etc/prometheus/
-sudo cp prometheus/rules/alerts.yml /etc/prometheus/rules/
-
-# Copy Telegraf config
+sudo cp -r prometheus/* /etc/prometheus/
 sudo cp telegraf/telegraf.conf /etc/telegraf/telegraf.conf
-
-# Copy Alertmanager config
 sudo cp alertmanager/config.yml /etc/alertmanager/config.yml
 
-# Setup custom script
+# Custom script
 sudo mkdir -p /opt/monitoring/scripts
 sudo cp scripts/check_old_files.sh /opt/monitoring/scripts/
 sudo chmod +x /opt/monitoring/scripts/check_old_files.sh
 
-# Restart services
-sudo systemctl restart prometheus
-sudo systemctl enable prometheus
+# Enable services
 sudo systemctl restart telegraf
 sudo systemctl enable telegraf
 sudo systemctl restart grafana-server
 sudo systemctl enable grafana-server
-sudo systemctl restart alertmanager
-sudo systemctl enable alertmanager
