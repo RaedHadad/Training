@@ -6,6 +6,9 @@ export DEBIAN_FRONTEND=noninteractive
 LOGFILE="/tmp/install_monitoring_$(date +%Y%m%d_%H%M%S).log"
 echo "Starting installation at $(date)" | tee -a "$LOGFILE"
 
+# Clean up existing InfluxData repo to avoid conflicts
+rm -f /etc/apt/sources.list.d/influxdata.list | tee -a "$LOGFILE"
+
 # Install base packages
 apt update | tee -a "$LOGFILE"
 apt install -y wget curl gnupg software-properties-common apt-transport-https ca-certificates | tee -a "$LOGFILE"
@@ -14,15 +17,15 @@ apt install -y wget curl gnupg software-properties-common apt-transport-https ca
 mkdir -p /etc/apt/keyrings | tee -a "$LOGFILE"
 
 # Add InfluxData (Telegraf) repo, forcing JAMMY for 24.04 compatibility
-curl -s https://repos.influxdata.com/influxdata-archive_compat.key | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
+curl -s https://repos.influxdata.com/influxdata-archive_compat.key | gpg --no-tty --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg | tee -a "$LOGFILE"
 echo "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/ubuntu jammy stable" | tee /etc/apt/sources.list.d/influxdata.list | tee -a "$LOGFILE"
 
 # Add Grafana repo
-curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+curl -fsSL https://apt.grafana.com/gpg.key | gpg --no-tty --dearmor -o /etc/apt/keyrings/grafana.gpg | tee -a "$LOGFILE"
 echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | tee /etc/apt/sources.list.d/grafana.list | tee -a "$LOGFILE"
 
 # Add Prometheus repo
-curl -fsSL https://packagecloud.io/prometheus-rpm/release/gpgkey | gpg --dearmor -o /etc/apt/keyrings/prometheus.gpg
+curl -fsSL https://packagecloud.io/prometheus-rpm/release/gpgkey | gpg --no-tty --dearmor -o /etc/apt/keyrings/prometheus.gpg | tee -a "$LOGFILE"
 echo "deb [signed-by=/etc/apt/keyrings/prometheus.gpg] https://packagecloud.io/prometheus-rpm/release/ubuntu jammy main" | tee /etc/apt/sources.list.d/prometheus.list | tee -a "$LOGFILE"
 
 # Install Telegraf, Grafana, and Prometheus
@@ -62,28 +65,11 @@ mkdir -p /etc/prometheus/rules /etc/alertmanager /opt/alertmanager/data
 chown -R nobody:nogroup /opt/alertmanager/data
 
 # Check and copy configuration files from Jenkins workspace
-if [ -d "$WORKSPACE/prometheus" ]; then
-    cp -r "$WORKSPACE/prometheus/"* /etc/prometheus/
-    chown -R prometheus:prometheus /etc/prometheus
-    echo "Copied Prometheus configuration" | tee -a "$LOGFILE"
-else
-    echo "Warning: $WORKSPACE/prometheus/ directory not found. Prometheus configuration not copied." | tee -a "$LOGFILE"
-fi
-
-if [ -f "$WORKSPACE/telegraf/telegraf.conf" ]; then
-    cp "$WORKSPACE/telegraf/telegraf.conf" /etc/telegraf/telegraf.conf
-    chown telegraf:telegraf /etc/telegraf/telegraf.conf
-    echo "Copied Telegraf configuration" | tee -a "$LOGFILE"
-else
-    echo "Warning: $WORKSPACE/telegraf/telegraf.conf not found. Using default Telegraf configuration." | tee -a "$LOGFILE"
-fi
-
-if [ -f "$WORKSPACE/alertmanager/alertmanager.yml" ]; then
-    cp "$WORKSPACE/alertmanager/alertmanager.yml" /etc/alertmanager/alertmanager.yml
+if [ -d "$WORKSPACE/alertmanager" ]; then
+    cp "$WORKSPACE/alertmanager/alertmanager.yml" /etc/alertmanager/alertmanager.yml 2>/dev/null || echo "Warning: alertmanager.yml not found in $WORKSPACE/alertmanager. Using default." | tee -a "$LOGFILE"
     chown nobody:nogroup /etc/alertmanager/alertmanager.yml
-    echo "Copied Alertmanager configuration" | tee -a "$LOGFILE"
 else
-    echo "Warning: $WORKSPACE/alertmanager/alertmanager.yml not found. Creating basic Alertmanager config." | tee -a "$LOGFILE"
+    echo "Warning: $WORKSPACE/alertmanager directory not found. Creating basic Alertmanager config." | tee -a "$LOGFILE"
     tee /etc/alertmanager/alertmanager.yml > /dev/null <<EOF
 global:
   resolve_timeout: 5m
@@ -93,6 +79,21 @@ receivers:
   - name: 'default'
 EOF
     chown nobody:nogroup /etc/alertmanager/alertmanager.yml
+fi
+
+if [ -d "$WORKSPACE/prometheus" ]; then
+    cp -r "$WORKSPACE/prometheus/"* /etc/prometheus/ 2>/dev/null || echo "Warning: No files found in $WORKSPACE/prometheus." | tee -a "$LOGFILE"
+    chown -R prometheus:prometheus /etc/prometheus
+else
+    echo "Warning: $WORKSPACE/prometheus directory not found. Prometheus configuration not copied." | tee -a "$LOGFILE"
+fi
+
+if [ -f "$WORKSPACE/telegraf/telegraf.conf" ]; then
+    cp "$WORKSPACE/telegraf/telegraf.conf" /etc/telegraf/telegraf.conf
+    chown telegraf:telegraf /etc/telegraf/telegraf.conf
+    echo "Copied Telegraf configuration" | tee -a "$LOGFILE"
+else
+    echo "Warning: $WORKSPACE/telegraf/telegraf.conf not found. Using default Telegraf configuration." | tee -a "$LOGFILE"
 fi
 
 if [ -f "$WORKSPACE/scripts/check_old_files.sh" ]; then
